@@ -1,0 +1,12 @@
+setuptools>=79.0.0
+wheel>=0.45.1
+streamlit==1.28.0
+pandas==2.0.3
+numpy==1.24.3
+plotly==5.18.0
+plotly-express==0.4.1
+kaleido==0.2.1
+tenacity==8.2.2
+SQLite3
+matplotlib==3.7.1
+seaborn==0.12.2 
