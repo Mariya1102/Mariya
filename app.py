@@ -9,7 +9,6 @@ Original file is located at
 
 import streamlit as st
 import pandas as pd
-import sqlite3
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
@@ -22,611 +21,102 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Bank Transactions Analyzer 🏦")
-
-# File upload
-uploaded_file = st.file_uploader("Upload Bank Transactions CSV", type=['csv'])
-if uploaded_file is not None:
-    try:
-        df = pd.read_csv(uploaded_file)
-        st.success("Data uploaded successfully!")
-        
-        # Show data overview
-        st.header("Data Overview")
-        st.dataframe(df.head())
-        
-        # Basic statistics
-        st.header("Basic Statistics")
-        st.write(df.describe())
-        
-        # Transaction amount distribution
-        st.header("Transaction Amount Distribution")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.histplot(data=df, x='TransactionAmount', bins=50)
-        plt.title('Distribution of Transaction Amounts')
-        st.pyplot(fig)
-        
-        # Transaction types
-        st.header("Transaction Types")
-        transaction_types = df['TransactionType'].value_counts()
-        fig, ax = plt.subplots(figsize=(10, 6))
-        transaction_types.plot(kind='bar')
-        plt.title('Transaction Types Distribution')
-        plt.xticks(rotation=45)
-        st.pyplot(fig)
-        
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-else:
-    st.info("Please upload a CSV file to begin analysis")
-
 class BankTransactionAnalyzer:
     def __init__(self):
-        self.db_path = "bank_transactions_data_2.db"
-        self.initialize_database()
-
-    def initialize_database(self):
-        """Initialize the SQLite database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS transactions (
-            TransactionID TEXT PRIMARY KEY,
-            AccountID TEXT,
-            TransactionAmount REAL,
-            TransactionDate TEXT,
-            TransactionType TEXT,
-            Location TEXT,
-            DeviceID TEXT,
-            IPAddress TEXT,
-            MerchantID TEXT,
-            Channel TEXT,
-            CustomerAge INTEGER,
-            CustomerOccupation TEXT,
-            TransactionDuration INTEGER,
-            LoginAttempts INTEGER,
-            AccountBalance REAL,
-            PreviousTransactionDate TEXT)''')
-        conn.commit()
-        conn.close()
+        self.data = None
 
     def upload_file(self):
-        """Handle file upload and display preview"""
         uploaded_file = st.file_uploader("Upload Bank Transactions CSV", type=['csv'])
         if uploaded_file is not None:
             try:
-                # Read and process file
                 df = pd.read_csv(uploaded_file)
-
-                # Clean column names by removing any extra spaces
                 df.columns = [col.strip() for col in df.columns]
-
-                # Convert date columns to datetime
                 df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
                 df['PreviousTransactionDate'] = pd.to_datetime(df['PreviousTransactionDate'])
-
-                # Save to database
-                conn = sqlite3.connect(self.db_path)
-                df.to_sql("transactions", conn, if_exists="replace", index=False)
-                conn.close()
-
+                self.data = df
                 st.success("Transaction data uploaded successfully!")
                 st.dataframe(df.head())
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
-    def get_data_from_db(self, query):
-        """Execute SQL query and return DataFrame"""
-        conn = sqlite3.connect(self.db_path)
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-        return df
-
     def transaction_analysis(self, analysis_type):
-        """Show transaction amount analysis"""
-        with st.container():
-            st.header("Transaction Analysis")
+        if self.data is None:
+            st.warning("Please upload data first!")
+            return
 
-            if analysis_type == 'Top Transactions by Amount':
-                df = self.get_data_from_db("""
-                    SELECT TransactionID, AccountID, TransactionAmount, Location, TransactionType
-                    FROM transactions
-                    ORDER BY TransactionAmount DESC
-                    LIMIT 10""")
+        if analysis_type == "Top Transactions by Amount":
+            st.subheader("Top 10 Transactions by Amount")
+            top_transactions = self.data.nlargest(10, 'TransactionAmount')
+            st.dataframe(top_transactions[['TransactionID', 'AccountID', 'TransactionAmount', 'TransactionType']])
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sns.barplot(data=top_transactions, x='TransactionID', y='TransactionAmount')
+            plt.xticks(rotation=45)
+            plt.title('Top 10 Transactions by Amount')
+            st.pyplot(fig)
 
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.barplot(x='TransactionID', y='TransactionAmount',
-                           data=df, palette='viridis', ax=ax)
-                ax.set_title('Top 10 Transactions by Amount')
-                ax.set_ylabel('Amount ($)')
-                ax.set_xlabel('Transaction ID')
-                plt.xticks(rotation=45)
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-            elif analysis_type == 'Transaction Type Distribution':
-                df = self.get_data_from_db("""
-                    SELECT TransactionType, COUNT(*) as Count,
-                    AVG(TransactionAmount) as AvgAmount
-                    FROM transactions
-                    GROUP BY TransactionType""")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-                # Transaction count by type
-                sns.barplot(x='TransactionType', y='Count',
-                           data=df, palette='coolwarm', ax=ax1)
-                ax1.set_title('Transaction Count by Type')
-                ax1.set_ylabel('Number of Transactions')
-                ax1.set_xlabel('Transaction Type')
-
-                # Average amount by type
-                sns.barplot(x='TransactionType', y='AvgAmount',
-                           data=df, palette='plasma', ax=ax2)
-                ax2.set_title('Average Amount by Transaction Type')
-                ax2.set_ylabel('Average Amount ($)')
-                ax2.set_xlabel('Transaction Type')
-
-                plt.tight_layout()
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-            elif analysis_type == 'Daily Transaction Trends':
-                df = self.get_data_from_db("""
-                    SELECT date(TransactionDate) as Date,
-                    SUM(TransactionAmount) as TotalAmount,
-                    COUNT(*) as TransactionCount
-                    FROM transactions
-                    GROUP BY date(TransactionDate)""")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                df['Date'] = pd.to_datetime(df['Date'])
-
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-
-                # Total amount over time
-                sns.lineplot(x='Date', y='TotalAmount',
-                            data=df, marker='o', ax=ax1)
-                ax1.set_title('Daily Transaction Amount Trends')
-                ax1.set_ylabel('Total Amount ($)')
-
-                # Transaction count over time
-                sns.lineplot(x='Date', y='TransactionCount',
-                            data=df, marker='o', ax=ax2)
-                ax2.set_title('Daily Transaction Count Trends')
-                ax2.set_ylabel('Number of Transactions')
-
-                plt.xticks(rotation=45)
-                plt.tight_layout()
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-            elif analysis_type == 'Transaction Amount by Location':
-                df = self.get_data_from_db("""
-                    SELECT Location,
-                    AVG(TransactionAmount) as AvgAmount,
-                    COUNT(*) as TransactionCount
-                    FROM transactions
-                    GROUP BY Location
-                    ORDER BY TransactionCount DESC
-                    LIMIT 10""")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-                # Average transaction by location
-                sns.barplot(x='Location', y='AvgAmount',
-                           data=df.sort_values('AvgAmount', ascending=False),
-                           palette='coolwarm', ax=ax1)
-                ax1.set_title('Average Transaction Amount by Location')
-                ax1.set_ylabel('Average Amount ($)')
-                ax1.set_xlabel('Location')
-                plt.sca(ax1)
-                plt.xticks(rotation=45)
-
-                # Transaction count by location
-                sns.barplot(x='Location', y='TransactionCount',
-                           data=df.sort_values('TransactionCount', ascending=False),
-                           palette='viridis', ax=ax2)
-                ax2.set_title('Transaction Count by Location')
-                ax2.set_ylabel('Number of Transactions')
-                ax2.set_xlabel('Location')
-                plt.sca(ax2)
-                plt.xticks(rotation=45)
-
-                plt.tight_layout()
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
+        elif analysis_type == "Transaction Type Distribution":
+            st.subheader("Transaction Type Distribution")
+            type_dist = self.data['TransactionType'].value_counts()
+            
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+            type_dist.plot(kind='bar', ax=ax1)
+            ax1.set_title('Transaction Types Count')
+            ax1.set_xlabel('Transaction Type')
+            ax1.set_ylabel('Count')
+            plt.xticks(rotation=45)
+            
+            type_amounts = self.data.groupby('TransactionType')['TransactionAmount'].mean()
+            type_amounts.plot(kind='bar', ax=ax2)
+            ax2.set_title('Average Amount by Transaction Type')
+            ax2.set_xlabel('Transaction Type')
+            ax2.set_ylabel('Average Amount')
+            plt.xticks(rotation=45)
+            
+            plt.tight_layout()
+            st.pyplot(fig)
 
     def customer_analysis(self, analysis_type):
-        """Analyze customer behavior"""
-        with st.container():
-            st.header("Customer Analysis")
+        if self.data is None:
+            st.warning("Please upload data first!")
+            return
 
-            if analysis_type == 'Top Customers by Transaction Volume':
-                df = self.get_data_from_db("""
-                    SELECT AccountID, COUNT(*) as TransactionCount,
-                    SUM(TransactionAmount) as TotalAmount,
-                    AVG(AccountBalance) as AvgBalance
-                    FROM transactions
-                    GROUP BY AccountID
-                    ORDER BY TotalAmount DESC
-                    LIMIT 10""")
+        if analysis_type == "Customer Age Analysis":
+            st.subheader("Customer Age Distribution")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sns.histplot(data=self.data, x='CustomerAge', bins=30)
+            plt.title('Customer Age Distribution')
+            st.pyplot(fig)
 
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-                # Total amount by customer
-                sns.barplot(x='AccountID', y='TotalAmount',
-                           data=df, palette='magma', ax=ax1)
-                ax1.set_title('Total Transaction Amount by Customer')
-                ax1.set_ylabel('Total Amount ($)')
-                ax1.set_xlabel('Account ID')
-                plt.sca(ax1)
-                plt.xticks(rotation=45)
-
-                # Transaction count by customer
-                sns.barplot(x='AccountID', y='TransactionCount',
-                           data=df, palette='plasma', ax=ax2)
-                ax2.set_title('Transaction Count by Customer')
-                ax2.set_ylabel('Number of Transactions')
-                ax2.set_xlabel('Account ID')
-                plt.sca(ax2)
-                plt.xticks(rotation=45)
-
-                plt.tight_layout()
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-            elif analysis_type == 'Customer Age Analysis':
-                df = self.get_data_from_db("SELECT CustomerAge FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                # Categorize into age groups
-                bins = [0, 18, 25, 35, 50, 65, 100]
-                labels = ['<18', '18-24', '25-34', '35-49', '50-64', '65+']
-                df['AgeGroup'] = pd.cut(df['CustomerAge'], bins=bins, labels=labels)
-
-                age_counts = df['AgeGroup'].value_counts().sort_index().reset_index()
-                age_counts.columns = ['AgeGroup', 'Count']
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.barplot(x='AgeGroup', y='Count', data=age_counts,
-                            palette='coolwarm', ax=ax)
-                ax.set_title('Customer Distribution by Age Group')
-                ax.set_xlabel('Age Group')
-                ax.set_ylabel('Number of Customers')
-                self.display_plot(fig)
-                st.dataframe(age_counts.to_dict('records'))
-
-            elif analysis_type == 'Occupation-Based Analysis':
-                df = self.get_data_from_db("""
-                    SELECT CustomerOccupation,
-                    AVG(TransactionAmount) as AvgAmount,
-                    COUNT(*) as TransactionCount,
-                    AVG(AccountBalance) as AvgBalance
-                    FROM transactions
-                    GROUP BY CustomerOccupation
-                    ORDER BY TransactionCount DESC
-                    LIMIT 10""")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-                # Average transaction amount by occupation
-                sns.barplot(x='CustomerOccupation', y='AvgAmount',
-                           data=df.sort_values('AvgAmount', ascending=False),
-                           palette='viridis', ax=ax1)
-                ax1.set_title('Average Transaction Amount by Occupation')
-                ax1.set_ylabel('Average Amount ($)')
-                ax1.set_xlabel('Occupation')
-                plt.sca(ax1)
-                plt.xticks(rotation=45)
-
-                # Transaction count by occupation
-                sns.barplot(x='CustomerOccupation', y='TransactionCount',
-                           data=df.sort_values('TransactionCount', ascending=False),
-                           palette='plasma', ax=ax2)
-                ax2.set_title('Transaction Count by Occupation')
-                ax2.set_ylabel('Number of Transactions')
-                ax2.set_xlabel('Occupation')
-                plt.sca(ax2)
-                plt.xticks(rotation=45)
-
-                plt.tight_layout()
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-            elif analysis_type == 'Account Balance Distribution':
-                df = self.get_data_from_db("SELECT AccountBalance FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.histplot(df['AccountBalance'], bins=20, kde=True, ax=ax)
-                ax.set_title('Customer Account Balance Distribution')
-                ax.set_xlabel('Account Balance ($)')
-                ax.set_ylabel('Number of Customers')
-                self.display_plot(fig)
-
-    def channel_analysis(self, analysis_type):
-        """Analyze transaction channels"""
-        with st.container():
-            st.header("Channel Analysis")
-
-            if analysis_type == 'Transaction Channel Distribution':
-                df = self.get_data_from_db("""
-                    SELECT Channel, COUNT(*) as Count,
-                    AVG(TransactionAmount) as AvgAmount
-                    FROM transactions
-                    GROUP BY Channel""")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-                # Transaction count by channel
-                sns.barplot(x='Channel', y='Count',
-                           data=df.sort_values('Count', ascending=False),
-                           palette='coolwarm', ax=ax1)
-                ax1.set_title('Transaction Count by Channel')
-                ax1.set_ylabel('Number of Transactions')
-                ax1.set_xlabel('Channel')
-
-                # Average amount by channel
-                sns.barplot(x='Channel', y='AvgAmount',
-                           data=df.sort_values('AvgAmount', ascending=False),
-                           palette='viridis', ax=ax2)
-                ax2.set_title('Average Amount by Channel')
-                ax2.set_ylabel('Average Amount ($)')
-                ax2.set_xlabel('Channel')
-
-                plt.tight_layout()
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-            elif analysis_type == 'Channel vs Amount':
-                df = self.get_data_from_db("SELECT Channel, TransactionAmount FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.boxplot(x='Channel', y='TransactionAmount',
-                           data=df, palette='coolwarm', ax=ax)
-                ax.set_title('Transaction Amount Distribution by Channel')
-                ax.set_ylabel('Amount ($)')
-                ax.set_xlabel('Channel')
-                plt.xticks(rotation=45)
-                self.display_plot(fig)
-
-            elif analysis_type == 'Channel Usage by Age Group':
-                df = self.get_data_from_db("SELECT Channel, CustomerAge FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                # Categorize into age groups
-                bins = [0, 18, 25, 35, 50, 65, 100]
-                labels = ['<18', '18-24', '25-34', '35-49', '50-64', '65+']
-                df['AgeGroup'] = pd.cut(df['CustomerAge'], bins=bins, labels=labels)
-
-                channel_age = df.groupby(['Channel', 'AgeGroup']).size().reset_index()
-                channel_age.columns = ['Channel', 'AgeGroup', 'Count']
-
-                fig, ax = plt.subplots(figsize=(12, 6))
-                sns.barplot(x='Channel', y='Count', hue='AgeGroup',
-                           data=channel_age, palette='viridis', ax=ax)
-                ax.set_title('Channel Usage by Age Group')
-                ax.set_ylabel('Number of Transactions')
-                ax.set_xlabel('Channel')
-                plt.xticks(rotation=45)
-                plt.legend(title='Age Group')
-                self.display_plot(fig)
-                st.dataframe(channel_age.to_dict('records'))
-
-            elif analysis_type == 'Channel Security Analysis':
-                df = self.get_data_from_db("SELECT Channel, LoginAttempts FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.boxplot(x='Channel', y='LoginAttempts',
-                           data=df, palette='coolwarm', ax=ax)
-                ax.set_title('Login Attempts by Channel')
-                ax.set_ylabel('Number of Login Attempts')
-                ax.set_xlabel('Channel')
-                plt.xticks(rotation=45)
-                self.display_plot(fig)
-
-    def time_analysis(self, analysis_type):
-        """Analyze transaction patterns by time"""
-        with st.container():
-            st.header("Time Analysis")
-
-            if analysis_type == 'Hourly Transaction Patterns':
-                df = self.get_data_from_db("SELECT TransactionDate FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                # Extract hour from datetime
-                df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
-                df['Hour'] = df['TransactionDate'].dt.hour
-                hourly_counts = df['Hour'].value_counts().sort_index().reset_index()
-                hourly_counts.columns = ['Hour', 'Count']
-
-                fig, ax = plt.subplots(figsize=(12, 6))
-                sns.lineplot(x='Hour', y='Count', data=hourly_counts,
-                             marker='o', ax=ax)
-                ax.set_title('Transaction Count by Hour of Day')
-                ax.set_xlabel('Hour of Day (24-hour format)')
-                ax.set_ylabel('Number of Transactions')
-                ax.set_xticks(range(0, 24))
-                self.display_plot(fig)
-                st.dataframe(hourly_counts.to_dict('records'))
-
-            elif analysis_type == 'Weekday vs Weekend Analysis':
-                df = self.get_data_from_db("SELECT TransactionDate, TransactionAmount FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
-                df['DayOfWeek'] = df['TransactionDate'].dt.day_name()
-                df['IsWeekend'] = df['TransactionDate'].dt.dayofweek >= 5
-
-                weekday_df = df.groupby('IsWeekend').agg({
-                    'TransactionAmount': ['sum', 'mean'],
-                    'TransactionDate': 'count'
-                }).reset_index()
-
-                weekday_df.columns = ['IsWeekend', 'TotalAmount', 'AvgAmount', 'Count']
-                weekday_df['IsWeekend'] = weekday_df['IsWeekend'].map({True: 'Weekend', False: 'Weekday'})
-
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-                # Total amount
-                sns.barplot(x='IsWeekend', y='TotalAmount',
-                           data=weekday_df, palette='coolwarm', ax=ax1)
-                ax1.set_title('Total Transaction Amount')
-                ax1.set_xlabel('')
-                ax1.set_ylabel('Total Amount ($)')
-
-                # Transaction count
-                sns.barplot(x='IsWeekend', y='Count',
-                           data=weekday_df, palette='viridis', ax=ax2)
-                ax2.set_title('Transaction Count')
-                ax2.set_xlabel('')
-                ax2.set_ylabel('Number of Transactions')
-
-                plt.tight_layout()
-                self.display_plot(fig)
-                st.dataframe(weekday_df.to_dict('records'))
-
-            elif analysis_type == 'Transaction Time Distribution':
-                df = self.get_data_from_db("SELECT TransactionDate FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
-                df['Hour'] = df['TransactionDate'].dt.hour
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.histplot(df['Hour'], bins=24, kde=True, ax=ax)
-                ax.set_title('Transaction Time Distribution')
-                ax.set_xlabel('Hour of Day')
-                ax.set_ylabel('Number of Transactions')
-                ax.set_xticks(range(0, 24))
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-            elif analysis_type == 'Time vs Amount Correlation':
-                df = self.get_data_from_db("SELECT TransactionDate, TransactionAmount FROM transactions")
-
-                if df.empty:
-                    st.error("No data available")
-                    return
-
-                df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
-                df['Hour'] = df['TransactionDate'].dt.hour
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.scatterplot(x='Hour', y='TransactionAmount',
-                               data=df, alpha=0.6, ax=ax)
-                ax.set_title('Transaction Amount by Time of Day')
-                ax.set_xlabel('Hour of Day')
-                ax.set_ylabel('Transaction Amount ($)')
-                ax.set_xticks(range(0, 24))
-                self.display_plot(fig)
-                st.dataframe(df.to_dict('records'))
-
-    def display_plot(self, fig):
-        """Display matplotlib figure as image"""
-        img = io.BytesIO()
-        plt.savefig(img, format='png', bbox_inches='tight', dpi=100)
-        img.seek(0)
-        img_data = base64.b64encode(img.read()).decode('utf-8')
-        plt.close(fig)
-        st.image(f'data:image/png;base64,{img_data}')
+            age_stats = self.data.groupby(pd.cut(self.data['CustomerAge'], 
+                                               bins=[0, 25, 35, 45, 55, 65, 100],
+                                               labels=['18-25', '26-35', '36-45', '46-55', '56-65', '65+']))
+            avg_transaction = age_stats['TransactionAmount'].mean()
+            st.write("Average Transaction Amount by Age Group:")
+            st.write(avg_transaction)
 
     def main(self):
-        """Main application interface"""
-        st.sidebar.title("Navigation")
-        page = st.sidebar.radio(
-            "Choose a page",
-            ["Upload Data", "Transaction Analysis", "Customer Analysis", "Channel Analysis", "Time Analysis"]
-        )
-
-        if page == "Upload Data":
-            st.header("Upload Transaction Data")
+        st.title("Bank Transactions Analyzer 🏦")
+        
+        menu = ["Upload Data", "Transaction Analysis", "Customer Analysis"]
+        choice = st.sidebar.selectbox("Menu", menu)
+        
+        if choice == "Upload Data":
             self.upload_file()
-        elif page == "Transaction Analysis":
-            st.header("Transaction Analysis")
+            
+        elif choice == "Transaction Analysis":
             analysis_type = st.selectbox(
-                "Select analysis type",
-                ["Top Transactions by Amount", "Transaction Type Distribution", 
-                 "Daily Transaction Trends", "Transaction Amount by Location"]
+                "Select Analysis Type",
+                ["Top Transactions by Amount", "Transaction Type Distribution"]
             )
             self.transaction_analysis(analysis_type)
-        elif page == "Customer Analysis":
-            st.header("Customer Analysis")
+            
+        elif choice == "Customer Analysis":
             analysis_type = st.selectbox(
-                "Select analysis type",
-                ["Top Customers by Transaction Volume", "Customer Age Analysis",
-                 "Occupation-Based Analysis", "Account Balance Distribution"]
+                "Select Analysis Type",
+                ["Customer Age Analysis"]
             )
             self.customer_analysis(analysis_type)
-        elif page == "Channel Analysis":
-            st.header("Channel Analysis")
-            analysis_type = st.selectbox(
-                "Select analysis type",
-                ["Transaction Channel Distribution", "Channel vs Amount",
-                 "Channel Usage by Age Group", "Channel Security Analysis"]
-            )
-            self.channel_analysis(analysis_type)
-        elif page == "Time Analysis":
-            st.header("Time Analysis")
-            analysis_type = st.selectbox(
-                "Select analysis type",
-                ["Hourly Transaction Patterns", "Weekday vs Weekend Analysis",
-                 "Transaction Time Distribution", "Time vs Amount Correlation"]
-            )
-            self.time_analysis(analysis_type)
 
 if __name__ == '__main__':
     app = BankTransactionAnalyzer()
