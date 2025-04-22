@@ -7,17 +7,58 @@ Original file is located at
     https://colab.research.google.com/drive/1ic_muAVLIETiWOvCsiqvBTHpb5PJj5D1
 """
 
+import streamlit as st
 import pandas as pd
 import sqlite3
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pywebio import start_server
-from pywebio.input import file_upload, select
-from pywebio.output import *
-from pywebio.session import run_async
+from datetime import datetime
 import io
 import base64
-from datetime import datetime
+
+st.set_page_config(
+    page_title="Bank Transactions Analyzer",
+    page_icon="🏦",
+    layout="wide"
+)
+
+st.title("Bank Transactions Analyzer 🏦")
+
+# File upload
+uploaded_file = st.file_uploader("Upload Bank Transactions CSV", type=['csv'])
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.success("Data uploaded successfully!")
+        
+        # Show data overview
+        st.header("Data Overview")
+        st.dataframe(df.head())
+        
+        # Basic statistics
+        st.header("Basic Statistics")
+        st.write(df.describe())
+        
+        # Transaction amount distribution
+        st.header("Transaction Amount Distribution")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.histplot(data=df, x='TransactionAmount', bins=50)
+        plt.title('Distribution of Transaction Amounts')
+        st.pyplot(fig)
+        
+        # Transaction types
+        st.header("Transaction Types")
+        transaction_types = df['TransactionType'].value_counts()
+        fig, ax = plt.subplots(figsize=(10, 6))
+        transaction_types.plot(kind='bar')
+        plt.title('Transaction Types Distribution')
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+        
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+else:
+    st.info("Please upload a CSV file to begin analysis")
 
 class BankTransactionAnalyzer:
     def __init__(self):
@@ -50,31 +91,28 @@ class BankTransactionAnalyzer:
 
     def upload_file(self):
         """Handle file upload and display preview"""
-        file = file_upload("Upload Bank Transactions CSV", accept=".csv")
-        if not file:
-            return
+        uploaded_file = st.file_uploader("Upload Bank Transactions CSV", type=['csv'])
+        if uploaded_file is not None:
+            try:
+                # Read and process file
+                df = pd.read_csv(uploaded_file)
 
-        try:
-            # Read and process file
-            df = pd.read_csv(io.BytesIO(file['content']))
+                # Clean column names by removing any extra spaces
+                df.columns = [col.strip() for col in df.columns]
 
-            # Clean column names by removing any extra spaces
-            df.columns = [col.strip() for col in df.columns]
+                # Convert date columns to datetime
+                df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
+                df['PreviousTransactionDate'] = pd.to_datetime(df['PreviousTransactionDate'])
 
-            # Convert date columns to datetime
-            df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
-            df['PreviousTransactionDate'] = pd.to_datetime(df['PreviousTransactionDate'])
+                # Save to database
+                conn = sqlite3.connect(self.db_path)
+                df.to_sql("transactions", conn, if_exists="replace", index=False)
+                conn.close()
 
-            # Save to database
-            conn = sqlite3.connect(self.db_path)
-            df.to_sql("transactions", conn, if_exists="replace", index=False)
-            conn.close()
-
-            put_success("Transaction data uploaded successfully!")
-            with use_scope('upload-content', clear=True):
-                put_table(df.head(10).to_dict('records'))
-        except Exception as e:
-            toast(f"Error: {str(e)}", color='error')
+                st.success("Transaction data uploaded successfully!")
+                st.dataframe(df.head())
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
 
     def get_data_from_db(self, query):
         """Execute SQL query and return DataFrame"""
@@ -83,17 +121,10 @@ class BankTransactionAnalyzer:
         conn.close()
         return df
 
-    def transaction_analysis(self):
+    def transaction_analysis(self, analysis_type):
         """Show transaction amount analysis"""
-        with use_scope('transaction-analysis', clear=True):
-            put_markdown("## Transaction Analysis")
-
-            analysis_type = select("Select analysis type", [
-                'Top Transactions by Amount',
-                'Transaction Type Distribution',
-                'Daily Transaction Trends',
-                'Transaction Amount by Location'
-            ])
+        with st.container():
+            st.header("Transaction Analysis")
 
             if analysis_type == 'Top Transactions by Amount':
                 df = self.get_data_from_db("""
@@ -103,7 +134,7 @@ class BankTransactionAnalyzer:
                     LIMIT 10""")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, ax = plt.subplots(figsize=(10, 6))
@@ -114,7 +145,7 @@ class BankTransactionAnalyzer:
                 ax.set_xlabel('Transaction ID')
                 plt.xticks(rotation=45)
                 self.display_plot(fig)
-                put_table(df.to_dict('records'))
+                st.dataframe(df.to_dict('records'))
 
             elif analysis_type == 'Transaction Type Distribution':
                 df = self.get_data_from_db("""
@@ -124,7 +155,7 @@ class BankTransactionAnalyzer:
                     GROUP BY TransactionType""")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
@@ -145,7 +176,7 @@ class BankTransactionAnalyzer:
 
                 plt.tight_layout()
                 self.display_plot(fig)
-                put_table(df.to_dict('records'))
+                st.dataframe(df.to_dict('records'))
 
             elif analysis_type == 'Daily Transaction Trends':
                 df = self.get_data_from_db("""
@@ -156,7 +187,7 @@ class BankTransactionAnalyzer:
                     GROUP BY date(TransactionDate)""")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 df['Date'] = pd.to_datetime(df['Date'])
@@ -178,7 +209,7 @@ class BankTransactionAnalyzer:
                 plt.xticks(rotation=45)
                 plt.tight_layout()
                 self.display_plot(fig)
-                put_table(df.to_dict('records'))
+                st.dataframe(df.to_dict('records'))
 
             elif analysis_type == 'Transaction Amount by Location':
                 df = self.get_data_from_db("""
@@ -191,7 +222,7 @@ class BankTransactionAnalyzer:
                     LIMIT 10""")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
@@ -218,19 +249,12 @@ class BankTransactionAnalyzer:
 
                 plt.tight_layout()
                 self.display_plot(fig)
-                put_table(df.to_dict('records'))
+                st.dataframe(df.to_dict('records'))
 
-    def customer_analysis(self):
+    def customer_analysis(self, analysis_type):
         """Analyze customer behavior"""
-        with use_scope('customer-analysis', clear=True):
-            put_markdown("## Customer Analysis")
-
-            analysis_type = select("Select analysis type", [
-                'Top Customers by Transaction Volume',
-                'Customer Age Analysis',
-                'Occupation-Based Analysis',
-                'Account Balance Distribution'
-            ])
+        with st.container():
+            st.header("Customer Analysis")
 
             if analysis_type == 'Top Customers by Transaction Volume':
                 df = self.get_data_from_db("""
@@ -243,7 +267,7 @@ class BankTransactionAnalyzer:
                     LIMIT 10""")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
@@ -268,13 +292,13 @@ class BankTransactionAnalyzer:
 
                 plt.tight_layout()
                 self.display_plot(fig)
-                put_table(df.to_dict('records'))
+                st.dataframe(df.to_dict('records'))
 
             elif analysis_type == 'Customer Age Analysis':
                 df = self.get_data_from_db("SELECT CustomerAge FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 # Categorize into age groups
@@ -292,7 +316,7 @@ class BankTransactionAnalyzer:
                 ax.set_xlabel('Age Group')
                 ax.set_ylabel('Number of Customers')
                 self.display_plot(fig)
-                put_table(age_counts.to_dict('records'))
+                st.dataframe(age_counts.to_dict('records'))
 
             elif analysis_type == 'Occupation-Based Analysis':
                 df = self.get_data_from_db("""
@@ -306,7 +330,7 @@ class BankTransactionAnalyzer:
                     LIMIT 10""")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
@@ -333,13 +357,13 @@ class BankTransactionAnalyzer:
 
                 plt.tight_layout()
                 self.display_plot(fig)
-                put_table(df.to_dict('records'))
+                st.dataframe(df.to_dict('records'))
 
             elif analysis_type == 'Account Balance Distribution':
                 df = self.get_data_from_db("SELECT AccountBalance FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, ax = plt.subplots(figsize=(10, 6))
@@ -349,17 +373,10 @@ class BankTransactionAnalyzer:
                 ax.set_ylabel('Number of Customers')
                 self.display_plot(fig)
 
-    def channel_analysis(self):
+    def channel_analysis(self, analysis_type):
         """Analyze transaction channels"""
-        with use_scope('channel-analysis', clear=True):
-            put_markdown("## Channel Analysis")
-
-            analysis_type = select("Select analysis type", [
-                'Transaction Channel Distribution',
-                'Channel vs Amount',
-                'Channel Usage by Age Group',
-                'Channel Security Analysis'
-            ])
+        with st.container():
+            st.header("Channel Analysis")
 
             if analysis_type == 'Transaction Channel Distribution':
                 df = self.get_data_from_db("""
@@ -369,7 +386,7 @@ class BankTransactionAnalyzer:
                     GROUP BY Channel""")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
@@ -392,13 +409,13 @@ class BankTransactionAnalyzer:
 
                 plt.tight_layout()
                 self.display_plot(fig)
-                put_table(df.to_dict('records'))
+                st.dataframe(df.to_dict('records'))
 
             elif analysis_type == 'Channel vs Amount':
                 df = self.get_data_from_db("SELECT Channel, TransactionAmount FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, ax = plt.subplots(figsize=(10, 6))
@@ -414,7 +431,7 @@ class BankTransactionAnalyzer:
                 df = self.get_data_from_db("SELECT Channel, CustomerAge FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 # Categorize into age groups
@@ -434,13 +451,13 @@ class BankTransactionAnalyzer:
                 plt.xticks(rotation=45)
                 plt.legend(title='Age Group')
                 self.display_plot(fig)
-                put_table(channel_age.to_dict('records'))
+                st.dataframe(channel_age.to_dict('records'))
 
             elif analysis_type == 'Channel Security Analysis':
                 df = self.get_data_from_db("SELECT Channel, LoginAttempts FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 fig, ax = plt.subplots(figsize=(10, 6))
@@ -452,23 +469,16 @@ class BankTransactionAnalyzer:
                 plt.xticks(rotation=45)
                 self.display_plot(fig)
 
-    def time_analysis(self):
+    def time_analysis(self, analysis_type):
         """Analyze transaction patterns by time"""
-        with use_scope('time-analysis', clear=True):
-            put_markdown("## Time Analysis")
-
-            analysis_type = select("Select analysis type", [
-                'Hourly Transaction Patterns',
-                'Weekday vs Weekend Analysis',
-                'Transaction Time Distribution',
-                'Time vs Amount Correlation'
-            ])
+        with st.container():
+            st.header("Time Analysis")
 
             if analysis_type == 'Hourly Transaction Patterns':
                 df = self.get_data_from_db("SELECT TransactionDate FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 # Extract hour from datetime
@@ -485,13 +495,13 @@ class BankTransactionAnalyzer:
                 ax.set_ylabel('Number of Transactions')
                 ax.set_xticks(range(0, 24))
                 self.display_plot(fig)
-                put_table(hourly_counts.to_dict('records'))
+                st.dataframe(hourly_counts.to_dict('records'))
 
             elif analysis_type == 'Weekday vs Weekend Analysis':
                 df = self.get_data_from_db("SELECT TransactionDate, TransactionAmount FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
@@ -524,13 +534,13 @@ class BankTransactionAnalyzer:
 
                 plt.tight_layout()
                 self.display_plot(fig)
-                put_table(weekday_df.to_dict('records'))
+                st.dataframe(weekday_df.to_dict('records'))
 
             elif analysis_type == 'Transaction Time Distribution':
                 df = self.get_data_from_db("SELECT TransactionDate FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
@@ -543,12 +553,13 @@ class BankTransactionAnalyzer:
                 ax.set_ylabel('Number of Transactions')
                 ax.set_xticks(range(0, 24))
                 self.display_plot(fig)
+                st.dataframe(df.to_dict('records'))
 
             elif analysis_type == 'Time vs Amount Correlation':
                 df = self.get_data_from_db("SELECT TransactionDate, TransactionAmount FROM transactions")
 
                 if df.empty:
-                    toast("No data available", color='error')
+                    st.error("No data available")
                     return
 
                 df['TransactionDate'] = pd.to_datetime(df['TransactionDate'])
@@ -562,6 +573,7 @@ class BankTransactionAnalyzer:
                 ax.set_ylabel('Transaction Amount ($)')
                 ax.set_xticks(range(0, 24))
                 self.display_plot(fig)
+                st.dataframe(df.to_dict('records'))
 
     def display_plot(self, fig):
         """Display matplotlib figure as image"""
@@ -570,280 +582,53 @@ class BankTransactionAnalyzer:
         img.seek(0)
         img_data = base64.b64encode(img.read()).decode('utf-8')
         plt.close(fig)
-        put_image(f'data:image/png;base64,{img_data}')
+        st.image(f'data:image/png;base64,{img_data}')
 
     def main(self):
         """Main application interface"""
-        put_html("""
-<style>
-    :root {
-        --primary-light: #a8c0ff;
-        --primary-main: #6a8bf5;
-        --primary-dark: #3a56b4;
-        --text-primary: #4a5568;
-        --text-secondary: #718096;
-        --background-light: #f8fafc;
-        --paper: rgba(255, 255, 255, 0.92);
-        --success: #68d391;
-        --warning: #f6ad55;
-        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
-        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-    }
+        st.sidebar.title("Navigation")
+        page = st.sidebar.radio(
+            "Choose a page",
+            ["Upload Data", "Transaction Analysis", "Customer Analysis", "Channel Analysis", "Time Analysis"]
+        )
 
-    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap');
-
-    body {
-        background:
-            linear-gradient(rgba(248, 250, 252, 0.92), rgba(248, 250, 252, 0.92)),
-            url('https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80') fixed;
-        background-size: cover;
-        color: var(--text-primary);
-        font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
-        margin: 0;
-        padding: 20px;
-        min-height: 100vh;
-        line-height: 1.6;
-    }
-
-    .pywebio-scope {
-        background: var(--paper);
-        padding: 28px;
-        border-radius: 14px;
-        margin-bottom: 24px;
-        box-shadow: var(--shadow-md);
-        border: 1px solid rgba(0, 0, 0, 0.04);
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .pywebio-scope:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
-    }
-
-    .tab-button {
-        transition: all 0.25s ease !important;
-        border-radius: 10px !important;
-        margin: 0 8px !important;
-        padding: 10px 22px !important;
-        background: rgba(255, 255, 255, 0.7) !important;
-        color: var(--text-primary) !important;
-        border: 1px solid rgba(0, 0, 0, 0.04) !important;
-        font-weight: 500 !important;
-        letter-spacing: 0.3px;
-    }
-
-    .tab-button.active {
-        background: linear-gradient(135deg, var(--primary-main), var(--primary-dark)) !important;
-        color: white !important;
-        box-shadow: 0 3px 8px rgba(106, 139, 245, 0.2) !important;
-    }
-
-    .tab-button:hover:not(.active) {
-        background: rgba(255, 255, 255, 0.9) !important;
-    }
-
-    h1 {
-        color: var(--primary-dark);
-        text-align: center;
-        font-size: 2.4rem;
-        margin: 10px 0 40px;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-        position: relative;
-        padding-bottom: 12px;
-    }
-
-    h1:after {
-        content: '';
-        position: absolute;
-        width: 80px;
-        height: 4px;
-        bottom: 0;
-        left: 50%;
-        transform: translateX(-50%);
-        background: linear-gradient(90deg, var(--primary-light), var(--primary-main));
-        border-radius: 2px;
-    }
-
-    button {
-        background: linear-gradient(135deg, var(--primary-main), var(--primary-dark)) !important;
-        color: white !important;
-        border: none !important;
-        padding: 12px 26px !important;
-        border-radius: 10px !important;
-        cursor: pointer !important;
-        transition: all 0.25s ease !important;
-        font-weight: 600 !important;
-        box-shadow: var(--shadow-sm) !important;
-        letter-spacing: 0.5px;
-        position: relative;
-        overflow: hidden;
-    }
-
-    button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 12px rgba(106, 139, 245, 0.25) !important;
-    }
-
-    button:active {
-        transform: translateY(0) !important;
-    }
-
-    button:after {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-        transition: 0.5s;
-    }
-
-    button:hover:after {
-        left: 100%;
-    }
-
-    /* Tab navigation */
-    .tab-nav {
-        background: var(--paper) !important;
-        border-radius: 14px !important;
-        padding: 10px !important;
-        box-shadow: var(--shadow-md) !important;
-        margin-bottom: 30px !important;
-        border: 1px solid rgba(0, 0, 0, 0.04);
-    }
-
-    /* Table styling */
-    table {
-        border-radius: 12px !important;
-        overflow: hidden !important;
-        box-shadow: var(--shadow-sm) !important;
-        background: white !important;
-        border-collapse: separate;
-        border-spacing: 0;
-    }
-
-    th {
-        background: linear-gradient(135deg, var(--primary-main), var(--primary-dark)) !important;
-        color: white !important;
-        padding: 16px !important;
-        font-weight: 600;
-    }
-
-    td {
-        padding: 14px 16px !important;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.03) !important;
-        color: var(--text-primary);
-    }
-
-    tr:last-child td {
-        border-bottom: none !important;
-    }
-
-    tr:hover td {
-        background: rgba(168, 192, 255, 0.05) !important;
-    }
-
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.02);
-        border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb {
-        background: rgba(106, 139, 245, 0.3);
-        border-radius: 4px;
-    }
-
-    /* Notification toasts */
-    .toast {
-        border-radius: 10px !important;
-        background: var(--primary-dark) !important;
-        color: white !important;
-        box-shadow: var(--shadow-md) !important;
-        backdrop-filter: blur(10px);
-    }
-
-    /* Charts container */
-    .plot-container {
-        border-radius: 14px !important;
-        overflow: hidden !important;
-        box-shadow: var(--shadow-sm) !important;
-        background: white !important;
-        padding: 18px !important;
-        border: 1px solid rgba(0, 0, 0, 0.04);
-    }
-
-    /* Input fields */
-    input, select, textarea {
-        border-radius: 10px !important;
-        padding: 12px 16px !important;
-        border: 1px solid rgba(0, 0, 0, 0.08) !important;
-        background: white !important;
-        transition: all 0.2s ease !important;
-        color: var(--text-primary);
-    }
-
-    input:focus, select:focus, textarea:focus {
-        border-color: var(--primary-main) !important;
-        box-shadow: 0 0 0 3px rgba(106, 139, 245, 0.1) !important;
-        outline: none !important;
-    }
-
-    /* Status indicators */
-    .success-bg {
-        background-color: var(--success) !important;
-    }
-
-    .warning-bg {
-        background-color: var(--warning) !important;
-    }
-
-    /* Special text colors */
-    .text-primary {
-        color: var(--primary-main) !important;
-    }
-
-    .text-secondary {
-        color: var(--text-secondary) !important;
-    }
-</style>
-""")
-        put_markdown("Bank Transaction Analyzer")
-
-        put_tabs([
-            {'title': 'Upload Data', 'content': [
-                put_button("Upload Transaction Data", onclick=self.upload_file),
-                put_scope('upload-content')
-            ]},
-            {'title': 'Transaction Analysis', 'content': [
-                put_button("Analyze Transactions", onclick=self.transaction_analysis),
-                put_scope('transaction-analysis')
-            ]},
-            {'title': ' Customer Analysis', 'content': [
-                put_button("Analyze Customer Behavior", onclick=self.customer_analysis),
-                put_scope('customer-analysis')
-            ]},
-            {'title': ' Channel Analysis', 'content': [
-                put_button("Analyze Transaction Channels", onclick=self.channel_analysis),
-                put_scope('channel-analysis')
-            ]},
-            {'title': 'Time Analysis', 'content': [
-                put_button("Analyze Transaction Timing", onclick=self.time_analysis),
-                put_scope('time-analysis')
-            ]}
-        ])
-
-def main():
-    app = BankTransactionAnalyzer()
-    app.main()
+        if page == "Upload Data":
+            st.header("Upload Transaction Data")
+            self.upload_file()
+        elif page == "Transaction Analysis":
+            st.header("Transaction Analysis")
+            analysis_type = st.selectbox(
+                "Select analysis type",
+                ["Top Transactions by Amount", "Transaction Type Distribution", 
+                 "Daily Transaction Trends", "Transaction Amount by Location"]
+            )
+            self.transaction_analysis(analysis_type)
+        elif page == "Customer Analysis":
+            st.header("Customer Analysis")
+            analysis_type = st.selectbox(
+                "Select analysis type",
+                ["Top Customers by Transaction Volume", "Customer Age Analysis",
+                 "Occupation-Based Analysis", "Account Balance Distribution"]
+            )
+            self.customer_analysis(analysis_type)
+        elif page == "Channel Analysis":
+            st.header("Channel Analysis")
+            analysis_type = st.selectbox(
+                "Select analysis type",
+                ["Transaction Channel Distribution", "Channel vs Amount",
+                 "Channel Usage by Age Group", "Channel Security Analysis"]
+            )
+            self.channel_analysis(analysis_type)
+        elif page == "Time Analysis":
+            st.header("Time Analysis")
+            analysis_type = st.selectbox(
+                "Select analysis type",
+                ["Hourly Transaction Patterns", "Weekday vs Weekend Analysis",
+                 "Transaction Time Distribution", "Time vs Amount Correlation"]
+            )
+            self.time_analysis(analysis_type)
 
 if __name__ == '__main__':
-    start_server(main, port=2027, debug=True)
+    app = BankTransactionAnalyzer()
+    app.main()
 
