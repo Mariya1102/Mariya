@@ -1,4 +1,5 @@
-pandas 
-matplotlib
-seaborn
-pywebio
+numpy==1.21.6
+pillow==9.0.1
+setuptools==65.5.1
+wheel==0.38.4
+python-dateutil==2.8.2
